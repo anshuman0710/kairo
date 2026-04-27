@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --yellow: #F5C842;
+  --yellow-light: #FFF8DC;
+  --navy: #0D1B2A;
+  --ink: #1C2B2B;
+  --slate: #4A5568;
+  --muted: #8A9BAA;
+  --offwhite: #FAFAF8;
+  --sage: #EAF4F0;
+  --amber-tint: #FFF9EE;
+  --border: rgba(0,0,0,0.07);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+
+.font-display { font-family: 'Fraunces', serif; }
+
+.fade-up {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.7s cubic-bezier(0.16,1,0.3,1), transform 0.7s cubic-bezier(0.16,1,0.3,1);
+}
+.fade-up.visible { opacity: 1; transform: translateY(0); }
+.fade-up.d1 { transition-delay: 0.1s; }
+.fade-up.d2 { transition-delay: 0.2s; }
+.fade-up.d3 { transition-delay: 0.3s; }
+.fade-up.d4 { transition-delay: 0.4s; }
+
+@keyframes ticker {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.ticker-track { animation: ticker 32s linear infinite; }
+.ticker-track:hover { animation-play-state: paused; }
+
+.btn-yellow {
+  display: inline-block; padding: 15px 34px; border-radius: 50px;
+  background: var(--yellow); color: var(--navy);
+  border: none; font-size: 16px; font-weight: 700;
+  cursor: pointer; text-decoration: none;
+  transition: all 0.2s;
+  box-shadow: 0 4px 20px rgba(245,200,66,0.4);
+}
+.btn-yellow:hover { filter: brightness(0.93); transform: scale(1.03); }
+
+.btn-dark {
+  display: inline-block; padding: 15px 34px; border-radius: 50px;
+  border: 2px solid var(--navy); color: var(--navy);
+  background: transparent; font-size: 16px; font-weight: 600;
+  cursor: pointer; text-decoration: none;
+  transition: all 0.2s;
+}
+.btn-dark:hover { background: var(--navy); color: white; }
+
+.btn-yellow-sm {
+  display: inline-block; padding: 8px 22px; border-radius: 50px;
+  background: var(--yellow); color: var(--navy);
+  border: none; font-size: 14px; font-weight: 700;
+  cursor: pointer; text-decoration: none; transition: all 0.2s;
+}
+.btn-yellow-sm:hover { filter: brightness(0.94); transform: scale(1.02); }
+
+.btn-outline-sm {
+  display: inline-block; padding: 8px 20px; border-radius: 50px;
+  border: 1.5px solid var(--navy); color: var(--navy);
+  background: transparent; font-size: 14px; font-weight: 600;
+  cursor: pointer; text-decoration: none; transition: all 0.2s;
+}
+.btn-outline-sm:hover { background: var(--navy); color: white; }
+
+.btn-white {
+  display: inline-block; padding: 15px 34px; border-radius: 50px;
+  background: white; color: var(--navy);
+  border: none; font-size: 16px; font-weight: 700;
+  cursor: pointer; text-decoration: none; transition: all 0.2s;
+}
+.btn-white:hover { transform: scale(1.03); }
+
+.btn-outline-white {
+  display: inline-block; padding: 15px 34px; border-radius: 50px;
+  border: 2px solid rgba(255,255,255,0.3); color: white;
+  background: transparent; font-size: 16px; font-weight: 600;
+  cursor: pointer; text-decoration: none; transition: all 0.2s;
+}
+.btn-outline-white:hover { border-color: white; }
+
+.mock-input {
+  background: var(--offwhite); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 14px;
+  font-size: 13px; color: var(--muted);
+  margin-bottom: 10px; width: 100%;
+}
+.mock-btn {
+  width: 100%; padding: 12px; border-radius: 50px;
+  background: var(--yellow); color: var(--navy);
+  font-size: 14px; font-weight: 700; border: none; cursor: default; margin-top: 6px;
+}
+.mock-btn.dark { background: var(--navy); color: white; }
+
+.progress-bar { background: var(--offwhite); border-radius: 50px; height: 6px; margin: 14px 0 6px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 50px; background: var(--yellow); width: 67%; }
+
+.status-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.status-row:last-child { border-bottom: none; }
+
+.sign-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
