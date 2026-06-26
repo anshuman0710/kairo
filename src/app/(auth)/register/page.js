@@ -27,7 +27,12 @@ export default function RegisterPage() {
   const router = useRouter();
 
   function getAuthClient() {
-    return getFirebaseAuth();
+    try {
+      return getFirebaseAuth();
+    } catch (e) {
+      console.error(e);
+      return null;
+    }
   }
 
   const [step, setStep] = useState(1);
@@ -77,6 +82,11 @@ export default function RegisterPage() {
       try {
         const firebaseAuth = getAuthClient();
 
+        if (!firebaseAuth) {
+          setError("Firebase client environment variables are missing.");
+          return;
+        }
+
         if (!isSignInWithEmailLink(firebaseAuth, window.location.href)) {
           return;
         }
@@ -125,6 +135,12 @@ export default function RegisterPage() {
       };
 
       const firebaseAuth = getAuthClient();
+      if (!firebaseAuth) {
+        setError("Firebase client environment variables are missing.");
+        setLoading(false);
+        return;
+      }
+
       await sendSignInLinkToEmail(firebaseAuth, email, actionCodeSettings);
       window.localStorage.setItem("nyaysetuEmailForSignIn", email);
       setEmailLinkSent(true);
@@ -151,6 +167,10 @@ export default function RegisterPage() {
     }
 
     const firebaseAuth = getAuthClient();
+    if (!firebaseAuth) {
+      setError("Firebase client environment variables are missing.");
+      return null;
+    }
     const verifier = new RecaptchaVerifier(firebaseAuth, "recaptcha-container", {
       size: "invisible",
       callback: () => {},
@@ -179,6 +199,12 @@ export default function RegisterPage() {
 
     try {
       const firebaseAuth = getAuthClient();
+      if (!firebaseAuth) {
+        setError("Firebase client environment variables are missing.");
+        setLoading(false);
+        return;
+      }
+
       firebaseAuth.languageCode = "en";
       const appVerifier = await initializeRecaptcha();
       const confirmation = await signInWithPhoneNumber(
