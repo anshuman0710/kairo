@@ -36,7 +36,8 @@ function getFirebaseApp() {
   ensureBrowserRuntime();
 
   if (!hasFirebaseClientConfig()) {
-    throw new Error("Firebase client environment variables are missing.");
+    console.warn("Firebase client environment variables are missing.");
+    return null;
   }
 
   if (!firebaseApp) {
@@ -47,15 +48,24 @@ function getFirebaseApp() {
 }
 
 export function getFirebaseAuth() {
+  const app = getFirebaseApp();
+  if (!app) return null;
+
   if (!firebaseAuth) {
-    firebaseAuth = getAuth(getFirebaseApp());
+    firebaseAuth = getAuth(app);
   }
+
   return firebaseAuth;
 }
 
 export function getFirebaseStorage() {
+  const app = getFirebaseApp();
+  if (!app) return null;
+
+  
   if (!firebaseStorage) {
-    firebaseStorage = getStorage(getFirebaseApp());
+    firebaseStorage = getStorage(app);
   }
+
   return firebaseStorage;
 }

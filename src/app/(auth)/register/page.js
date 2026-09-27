@@ -2,22 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
 import { useEffect, useState } from "react";
 import {
-  isSignInWithEmailLink,
-  sendSignInLinkToEmail,
-  signOut,
-  signInWithEmailLink,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  updateProfile,
 } from "firebase/auth";
 
 import { getFirebaseAuth } from "@/lib/firebase/client";
-
-function normalizePhone(value) {
-  return String(value || "")
-    .replace(/\D/g, "")
-    .slice(-10);
-}
+import { formatFirebaseAuthError } from "@/lib/firebase/authErrors";
 
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
@@ -26,244 +19,152 @@ function isValidEmail(value) {
 export default function RegisterPage() {
   const router = useRouter();
 
-  function getAuthClient() {
-    return getFirebaseAuth();
-  }
-
-  const [step, setStep] = useState(1);
-  const [emailLinkSent, setEmailLinkSent] = useState(false);
-  const [emailVerified, setEmailVerified] = useState(false);
-  const [firebaseEmailToken, setFirebaseEmailToken] = useState("");
-  const [phone, setPhone] = useState("");
-  const [phoneOtp, setPhoneOtp] = useState("");
-  const [phoneOtpSent, setPhoneOtpSent] = useState(false);
-  const [phoneVerified, setPhoneVerified] = useState(false);
-  const [firebasePhoneToken, setFirebasePhoneToken] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [phone, setPhone] = useState("");
   const [city, setCity] = useState("Jalandhar");
   const [state, setState] = useState("Punjab");
+
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [countdown, setCountdown] = useState(0);
+  const [registeredEmail, setRegisteredEmail] = useState("");
+  const [isRegistered, setIsRegistered] = useState(false);
+
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [resendMessage, setResendMessage] = useState("");
 
   useEffect(() => {
-    if (!emailLinkSent || countdown <= 0) {
-      return;
-    }
-
+    if (resendCooldown <= 0) return;
     const timer = setInterval(() => {
-      setCountdown((previous) => {
-        if (previous <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-
-        return previous - 1;
-      });
+      setResendCooldown((prev) => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
-
-    return () => {
-      clearInterval(timer);
-    };
-  }, [emailLinkSent, countdown]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const completeEmailLinkSignIn = async () => {
-      try {
-        const firebaseAuth = getAuthClient();
-
-        if (!isSignInWithEmailLink(firebaseAuth, window.location.href)) {
-          return;
-        }
-
-        const storedEmail = window.localStorage.getItem("nyaysetuEmailForSignIn");
-        const candidateEmail = String(storedEmail || email || "").trim();
-        if (!candidateEmail) {
-          setError("Missing email context. Please enter your email and request the link again.");
-          return;
-        }
-
-        const result = await signInWithEmailLink(firebaseAuth, candidateEmail, window.location.href);
-        const token = await result.user.getIdToken(true);
-
-        setEmail(candidateEmail);
-        setFirebaseEmailToken(token);
-        setEmailVerified(true);
-        setError("");
-        setStep(2);
-        await signOut(firebaseAuth).catch(() => {});
-        window.localStorage.removeItem("nyaysetuEmailForSignIn");
-        router.replace("/register");
-      } catch (linkError) {
-        setError(linkError.message || "Unable to verify email link. Please try again.");
-      }
-    };
-
-    completeEmailLinkSignIn();
-  }, [email, router]);
-
-  async function sendEmailOtp() {
-    if (!isValidEmail(email)) {
-      setError("Please enter a valid email address first.");
-      return;
-    }
-
-    setError("");
-    setEmailVerified(false);
-    setFirebaseEmailToken("");
-    setLoading(true);
-
-    try {
-      const actionCodeSettings = {
-        url: `${window.location.origin}/register`,
-        handleCodeInApp: true,
-      };
-
-      const firebaseAuth = getAuthClient();
-      await sendSignInLinkToEmail(firebaseAuth, email, actionCodeSettings);
-      window.localStorage.setItem("nyaysetuEmailForSignIn", email);
-      setEmailLinkSent(true);
-      setCountdown(30);
-    } catch (emailOtpError) {
-      setError(emailOtpError.message || "Unable to send verification link right now.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function initializeRecaptcha() {
-    if (typeof window === "undefined") {
-      return null;
-    }
-
-    if (window.recaptchaVerifier && typeof window.recaptchaVerifier.clear === "function") {
-      try {
-        window.recaptchaVerifier.clear();
-      } catch (_error) {
-        // ignore clear failures
-      }
-      window.recaptchaVerifier = null;
-    }
-
-    const firebaseAuth = getAuthClient();
-    const verifier = new RecaptchaVerifier(firebaseAuth, "recaptcha-container", {
-      size: "invisible",
-      callback: () => {},
-      "expired-callback": () => {
-        setError("reCAPTCHA expired. Please tap Send Phone OTP again.");
-      },
-    });
-
-    await verifier.render();
-    window.recaptchaVerifier = verifier;
-    return verifier;
-  }
-
-  async function sendPhoneOtp() {
-    const normalizedPhone = normalizePhone(phone);
-    if (!/^\d{10}$/.test(normalizedPhone)) {
-      setError("Phone must be a valid 10-digit number.");
-      return;
-    }
-
-    setError("");
-    setLoading(true);
-    setPhoneOtpSent(false);
-    setPhoneVerified(false);
-    setFirebasePhoneToken("");
-
-    try {
-      const firebaseAuth = getAuthClient();
-      firebaseAuth.languageCode = "en";
-      const appVerifier = await initializeRecaptcha();
-      const confirmation = await signInWithPhoneNumber(
-        firebaseAuth,
-        `+91${normalizedPhone}`,
-        appVerifier
-      );
-
-      window.confirmationResult = confirmation;
-      setPhoneOtpSent(true);
-    } catch (phoneOtpError) {
-      const code = String(phoneOtpError?.code || "").toLowerCase();
-      if (code.includes("operation-not-allowed")) {
-        setError("Phone provider is disabled in Firebase Auth. Enable Phone sign-in method.");
-      } else if (code.includes("invalid-app-credential") || code.includes("captcha-check-failed")) {
-        setError("reCAPTCHA verification failed. Check authorized domains and retry.");
-      } else if (code.includes("too-many-requests")) {
-        setError("Too many attempts. Please wait and try again.");
-      } else if (code.includes("invalid-phone-number")) {
-        setError("Please enter a valid phone number in +91 format.");
-      } else {
-        setError(phoneOtpError.message || "Unable to send phone OTP right now.");
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function verifyPhoneOtp() {
-    setError("");
-    setLoading(true);
-
-    try {
-      if (!window.confirmationResult) {
-        throw new Error("Please request phone OTP again.");
-      }
-
-      const result = await window.confirmationResult.confirm(phoneOtp);
-      const token = await result.user.getIdToken(true);
-
-      setFirebasePhoneToken(token);
-
-      setPhoneVerified(true);
-      setStep(3);
-    } catch (verifyPhoneError) {
-      setError(verifyPhoneError.message || "Invalid phone OTP. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
 
   async function handleRegister(event) {
     event.preventDefault();
     setError("");
+    setResendMessage("");
+
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim().toLowerCase();
+
+    if (!trimmedName) {
+      setError("Please enter your full name.");
+      return;
+    }
+    if (!isValidEmail(trimmedEmail)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters long.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Passwords do not match. Please verify both fields.");
+      return;
+    }
+
     setLoading(true);
 
     try {
+      const firebaseAuth = getFirebaseAuth();
+      if (!firebaseAuth) {
+        throw new Error("Firebase Authentication is not available. Please check configuration.");
+      }
+
+      // 1. Create Firebase Auth user
+      const userCredential = await createUserWithEmailAndPassword(
+        firebaseAuth,
+        trimmedEmail,
+        password
+      );
+
+      // 2. Set Firebase displayName
+      if (userCredential.user) {
+        await updateProfile(userCredential.user, { displayName: trimmedName }).catch(() => {});
+      }
+
+      // 3. Send email verification link
+      await sendEmailVerification(userCredential.user);
+
+      // 4. Register in database
       const response = await fetch("/api/auth/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          name,
-          email,
+          name: trimmedName,
+          email: trimmedEmail,
           password,
           city,
           state,
-          phone: normalizePhone(phone),
-          emailVerified: true,
-          phoneVerified: true,
-          firebaseEmailToken,
-          firebasePhoneToken,
+          phone: phone.replace(/\D/g, "").slice(-10),
+          firebaseUid: userCredential.user.uid,
         }),
       });
 
       const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(data?.message || "Unable to create account.");
+        throw new Error(data?.message || "Failed to create account profile.");
       }
 
-      router.push("/dashboard/citizen");
-    } catch (registerError) {
-      setError(registerError.message || "Something went wrong. Please try again.");
+      setRegisteredEmail(trimmedEmail);
+      setIsRegistered(true);
+      setResendCooldown(60);
+    } catch (err) {
+      setError(formatFirebaseAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResendVerification() {
+    if (resendCooldown > 0) return;
+    setError("");
+    setResendMessage("");
+    setLoading(true);
+
+    try {
+      const firebaseAuth = getFirebaseAuth();
+      const currentUser = firebaseAuth?.currentUser;
+
+      if (!currentUser) {
+        throw new Error("Please log in to resend the verification link.");
+      }
+
+      await sendEmailVerification(currentUser);
+      setResendMessage("Verification email resent. Please check your inbox and spam folder.");
+      setResendCooldown(60);
+    } catch (err) {
+      setError(formatFirebaseAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function checkVerificationStatus() {
+    setLoading(true);
+    setError("");
+    try {
+      const firebaseAuth = getFirebaseAuth();
+      const currentUser = firebaseAuth?.currentUser;
+      if (currentUser) {
+        await currentUser.reload();
+        if (currentUser.emailVerified) {
+          router.push(`/login?email=${encodeURIComponent(currentUser.email || "")}&verified=true`);
+          return;
+        }
+      }
+      setResendMessage("Email is not verified yet. Please check your inbox and click the verification link.");
+    } catch (err) {
+      setError(formatFirebaseAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -307,425 +208,393 @@ export default function RegisterPage() {
             padding: "28px 24px",
           }}
         >
-          <h1
-            style={{
-              fontFamily: "Fraunces, serif",
-              fontSize: 36,
-              color: "#0D1B2A",
-              letterSpacing: "-0.03em",
-              lineHeight: 1.05,
-              fontWeight: 700,
-              marginBottom: 8,
-            }}
-          >
-            Register
-          </h1>
-
-          <p style={{ fontSize: 14, color: "#4A5568", marginBottom: 16 }}>
-            Join NyaySetu and report civic issues with confidence.
-          </p>
-
-          <div className="mb-5 flex items-center gap-2">
-            <span
-              style={{
-                borderRadius: 999,
-                padding: "5px 12px",
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                background: step === 1 ? "#F5C842" : "#FAFAF8",
-                color: step === 1 ? "#0D1B2A" : "#8A9BAA",
-              }}
-            >
-              Verify Email
-            </span>
-            <span
-              style={{
-                borderRadius: 999,
-                padding: "5px 12px",
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                background: step === 2 ? "#F5C842" : "#FAFAF8",
-                color: step === 2 ? "#0D1B2A" : "#8A9BAA",
-              }}
-            >
-              Verify Phone
-            </span>
-            <span
-              style={{
-                borderRadius: 999,
-                padding: "5px 12px",
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                background: step === 3 ? "#F5C842" : "#FAFAF8",
-                color: step === 3 ? "#0D1B2A" : "#8A9BAA",
-              }}
-            >
-              Your Details
-            </span>
-          </div>
-
-          {step === 1 ? (
-            <div className="space-y-5">
-              <div>
-                <label htmlFor="email" style={{ display: "block", marginBottom: 7, fontSize: 12, fontWeight: 600, color: "#4A5568" }}>
-                  Email Address
-                </label>
-                <input
-                  id="email"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  style={{
-                    width: "100%",
-                    border: "1px solid rgba(0,0,0,0.08)",
-                    background: "#FAFAF8",
-                    borderRadius: 12,
-                    padding: "12px 14px",
-                    fontSize: 14,
-                    color: "#0D1B2A",
-                    outline: "none",
-                  }}
-                />
-              </div>
-
-              <button
-                type="button"
-                onClick={sendEmailOtp}
-                disabled={loading || !isValidEmail(email)}
-                className="btn-yellow"
+          {isRegistered ? (
+            <div className="space-y-4 text-center">
+              <div
                 style={{
-                  width: "100%",
-                  textAlign: "center",
-                  opacity: loading || !isValidEmail(email) ? 0.75 : 1,
-                  cursor: loading || !isValidEmail(email) ? "not-allowed" : "pointer",
-                  marginTop: 8,
+                  width: 56,
+                  height: 56,
+                  borderRadius: "50%",
+                  background: "rgba(245,200,66,0.2)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  margin: "0 auto 8px auto",
+                  fontSize: 26,
                 }}
               >
-                {loading ? "Sending link..." : "Send Verification Link"}
-              </button>
+                ✉️
+              </div>
 
-              {emailLinkSent ? (
-                <div
-                  style={{
-                    background: "#FAFAF8",
-                    border: "1px solid rgba(0,0,0,0.06)",
-                    borderRadius: 14,
-                    padding: 14,
-                    marginTop: 8,
-                  }}
-                >
-                  <p style={{ margin: 0, fontSize: 13, color: "#4A5568", lineHeight: 1.6 }}>
-                    We sent a verification link to <strong>{email}</strong>. Open your email and click the link.
-                    You will be redirected here automatically and verification will complete.
-                  </p>
+              <h1
+                style={{
+                  fontFamily: "Fraunces, serif",
+                  fontSize: 28,
+                  color: "#0D1B2A",
+                  letterSpacing: "-0.02em",
+                  fontWeight: 700,
+                }}
+              >
+                Check your email
+              </h1>
 
-                  {emailVerified ? (
-                    <p style={{ marginTop: 10, fontSize: 13, color: "#166534", fontWeight: 700 }}>
-                      Email verified successfully.
-                    </p>
-                  ) : null}
+              <p style={{ fontSize: 14, color: "#4A5568", lineHeight: 1.6 }}>
+                We&apos;ve sent a verification link to <strong>{registeredEmail}</strong>.
+                Please verify your email address to activate your account before logging in.
+              </p>
 
-                  <div style={{ marginTop: 10, textAlign: "center" }}>
-                    {countdown > 0 ? (
-                      <span style={{ fontSize: 12, color: "#8A9BAA" }}>Resend in {countdown}s</span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={sendEmailOtp}
-                        style={{ border: "none", background: "transparent", fontSize: 12, color: "#0D1B2A", fontWeight: 700, cursor: "pointer" }}
-                      >
-                        Resend OTP
-                      </button>
-                    )}
-                  </div>
-                </div>
+              {resendMessage ? (
+                <p style={{ fontSize: 13, color: "#166534", fontWeight: 600 }}>
+                  {resendMessage}
+                </p>
               ) : null}
-            </div>
-          ) : null}
 
-          {step === 2 ? (
-            <div className="space-y-5">
-              <div>
-                <label htmlFor="phone" style={{ display: "block", marginBottom: 7, fontSize: 12, fontWeight: 600, color: "#4A5568" }}>
-                  Mobile Number
-                </label>
-                <input
-                  id="phone"
-                  type="tel"
-                  placeholder="10-digit mobile number"
-                  value={phone}
-                  onChange={(event) => setPhone(event.target.value.replace(/\D/g, ""))}
+              {error ? (
+                <p style={{ fontSize: 13, color: "#B91C1C", fontWeight: 500 }}>
+                  {error}
+                </p>
+              ) : null}
+
+              <div className="pt-2 space-y-3">
+                <button
+                  type="button"
+                  onClick={checkVerificationStatus}
+                  disabled={loading}
+                  className="btn-yellow"
                   style={{
                     width: "100%",
-                    border: "1px solid rgba(0,0,0,0.08)",
-                    background: "#FAFAF8",
-                    borderRadius: 12,
-                    padding: "12px 14px",
-                    fontSize: 14,
-                    color: "#0D1B2A",
-                    outline: "none",
-                  }}
-                />
-              </div>
-
-              <button
-                type="button"
-                onClick={sendPhoneOtp}
-                disabled={loading || normalizePhone(phone).length !== 10}
-                className="btn-yellow"
-                style={{
-                  width: "100%",
-                  textAlign: "center",
-                  opacity: loading || normalizePhone(phone).length !== 10 ? 0.75 : 1,
-                  cursor: loading || normalizePhone(phone).length !== 10 ? "not-allowed" : "pointer",
-                  marginTop: 8,
-                }}
-              >
-                {loading ? "Sending OTP..." : "Send Phone OTP"}
-              </button>
-
-              {phoneOtpSent ? (
-                <div
-                  style={{
-                    background: "#FAFAF8",
-                    border: "1px solid rgba(0,0,0,0.06)",
-                    borderRadius: 14,
-                    padding: 14,
-                    marginTop: 8,
+                    textAlign: "center",
+                    cursor: loading ? "not-allowed" : "pointer",
                   }}
                 >
-                  <div>
-                    <label htmlFor="phone-otp" style={{ display: "block", marginBottom: 7, fontSize: 12, fontWeight: 600, color: "#4A5568" }}>
-                      Enter Phone OTP
-                    </label>
-                    <input
-                      id="phone-otp"
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={phoneOtp}
-                      onChange={(event) => setPhoneOtp(event.target.value.replace(/\D/g, ""))}
-                      style={{
-                        width: "100%",
-                        border: "1px solid rgba(0,0,0,0.08)",
-                        background: "white",
-                        borderRadius: 10,
-                        padding: "10px 12px",
-                        fontSize: 20,
-                        letterSpacing: "0.2em",
-                        textAlign: "center",
-                        color: "#0D1B2A",
-                        outline: "none",
-                      }}
-                    />
-                  </div>
+                  {loading ? "Checking..." : "I've Verified My Email"}
+                </button>
 
-                  <button
-                    type="button"
-                    onClick={verifyPhoneOtp}
-                    disabled={loading || phoneOtp.trim().length !== 6}
-                    className="btn-dark"
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={loading || resendCooldown > 0}
+                  className="btn-outline-sm"
+                  style={{
+                    width: "100%",
+                    textAlign: "center",
+                    opacity: resendCooldown > 0 ? 0.6 : 1,
+                    cursor: resendCooldown > 0 || loading ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {resendCooldown > 0
+                    ? `Resend in ${resendCooldown}s`
+                    : "Resend Verification Email"}
+                </button>
+
+                <div className="pt-2">
+                  <Link
+                    href="/login"
                     style={{
-                      width: "100%",
-                      textAlign: "center",
-                      marginTop: 12,
-                      opacity: loading || phoneOtp.trim().length !== 6 ? 0.75 : 1,
-                      cursor: loading || phoneOtp.trim().length !== 6 ? "not-allowed" : "pointer",
+                      fontSize: 13,
+                      color: "#0D1B2A",
+                      fontWeight: 700,
+                      textDecoration: "none",
                     }}
                   >
-                    {loading ? "Verifying..." : "Verify Phone OTP"}
-                  </button>
+                    Go to Login &rarr;
+                  </Link>
                 </div>
-              ) : null}
-
-              <div id="recaptcha-container" />
+              </div>
             </div>
-          ) : null}
+          ) : (
+            <>
+              <h1
+                style={{
+                  fontFamily: "Fraunces, serif",
+                  fontSize: 32,
+                  color: "#0D1B2A",
+                  letterSpacing: "-0.03em",
+                  lineHeight: 1.1,
+                  fontWeight: 700,
+                  marginBottom: 6,
+                }}
+              >
+                Create Account
+              </h1>
 
-          {step === 3 ? (
-            <form onSubmit={handleRegister} className="space-y-5">
-              <div>
-                <label htmlFor="name" style={{ display: "block", marginBottom: 7, fontSize: 12, fontWeight: 600, color: "#4A5568" }}>
-                  Full Name
-                </label>
-                <input
-                  id="name"
-                  type="text"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  required
-                  style={{
-                    width: "100%",
-                    border: "1px solid rgba(0,0,0,0.08)",
-                    background: "#FAFAF8",
-                    borderRadius: 12,
-                    padding: "12px 14px",
-                    fontSize: 14,
-                    color: "#0D1B2A",
-                    outline: "none",
-                  }}
-                />
-              </div>
+              <p style={{ fontSize: 13, color: "#4A5568", marginBottom: 18 }}>
+                Join NyaySetu and participate in civic accountability.
+              </p>
 
-              <div>
-                <label htmlFor="email" style={{ display: "block", marginBottom: 7, fontSize: 12, fontWeight: 600, color: "#4A5568" }}>
-                  Email address
-                </label>
-                <input
-                  id="email"
-                  type="email"
-                  value={email}
-                  disabled
-                  required
-                  style={{
-                    width: "100%",
-                    border: "1px solid rgba(0,0,0,0.08)",
-                    background: "#FAFAF8",
-                    borderRadius: 12,
-                    padding: "12px 14px",
-                    fontSize: 14,
-                    color: "#0D1B2A",
-                    outline: "none",
-                  }}
-                />
-              </div>
-
-              <div>
-                <label htmlFor="password" style={{ display: "block", marginBottom: 7, fontSize: 12, fontWeight: 600, color: "#4A5568" }}>
-                  Password
-                </label>
-                <div style={{ position: "relative" }}>
+              <form onSubmit={handleRegister} className="space-y-4">
+                <div>
+                  <label
+                    htmlFor="name"
+                    style={{ display: "block", marginBottom: 5, fontSize: 12, fontWeight: 600, color: "#4A5568" }}
+                  >
+                    Full Name
+                  </label>
                   <input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
+                    id="name"
+                    type="text"
+                    placeholder="Enter your full name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
                     required
                     style={{
                       width: "100%",
                       border: "1px solid rgba(0,0,0,0.08)",
                       background: "#FAFAF8",
-                      borderRadius: 12,
-                      padding: "12px 44px 12px 14px",
+                      borderRadius: 10,
+                      padding: "10px 12px",
                       fontSize: 14,
                       color: "#0D1B2A",
                       outline: "none",
                     }}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((previous) => !previous)}
-                    style={{
-                      position: "absolute",
-                      right: 12,
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      border: "none",
-                      background: "transparent",
-                      color: "#4A5568",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                  >
-                    {showPassword ? "Hide" : "Show"}
-                  </button>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
-                  <label htmlFor="city" style={{ display: "block", marginBottom: 7, fontSize: 12, fontWeight: 600, color: "#4A5568" }}>
-                    City
+                  <label
+                    htmlFor="email"
+                    style={{ display: "block", marginBottom: 5, fontSize: 12, fontWeight: 600, color: "#4A5568" }}
+                  >
+                    Email Address
                   </label>
-                  <select
-                    id="city"
-                    value={city}
-                    onChange={(event) => setCity(event.target.value)}
+                  <input
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
                     required
                     style={{
                       width: "100%",
                       border: "1px solid rgba(0,0,0,0.08)",
                       background: "#FAFAF8",
-                      borderRadius: 12,
-                      padding: "12px 14px",
+                      borderRadius: 10,
+                      padding: "10px 12px",
                       fontSize: 14,
                       color: "#0D1B2A",
                       outline: "none",
                     }}
-                  >
-                    <option value="Jalandhar">Jalandhar</option>
-                    <option value="Ludhiana">Ludhiana</option>
-                    <option value="Amritsar">Amritsar</option>
-                    <option value="Chandigarh">Chandigarh</option>
-                  </select>
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="password"
+                      style={{ display: "block", marginBottom: 5, fontSize: 12, fontWeight: 600, color: "#4A5568" }}
+                    >
+                      Password
+                    </label>
+                    <div style={{ position: "relative" }}>
+                      <input
+                        id="password"
+                        type={showPassword ? "text" : "password"}
+                        placeholder="At least 6 chars"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        minLength={6}
+                        style={{
+                          width: "100%",
+                          border: "1px solid rgba(0,0,0,0.08)",
+                          background: "#FAFAF8",
+                          borderRadius: 10,
+                          padding: "10px 36px 10px 12px",
+                          fontSize: 14,
+                          color: "#0D1B2A",
+                          outline: "none",
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((prev) => !prev)}
+                        style={{
+                          position: "absolute",
+                          right: 10,
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          border: "none",
+                          background: "transparent",
+                          color: "#4A5568",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                      >
+                        {showPassword ? "Hide" : "Show"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="confirmPassword"
+                      style={{ display: "block", marginBottom: 5, fontSize: 12, fontWeight: 600, color: "#4A5568" }}
+                    >
+                      Confirm Password
+                    </label>
+                    <div style={{ position: "relative" }}>
+                      <input
+                        id="confirmPassword"
+                        type={showConfirmPassword ? "text" : "password"}
+                        placeholder="Re-enter password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        required
+                        minLength={6}
+                        style={{
+                          width: "100%",
+                          border: "1px solid rgba(0,0,0,0.08)",
+                          background: "#FAFAF8",
+                          borderRadius: 10,
+                          padding: "10px 36px 10px 12px",
+                          fontSize: 14,
+                          color: "#0D1B2A",
+                          outline: "none",
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword((prev) => !prev)}
+                        style={{
+                          position: "absolute",
+                          right: 10,
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          border: "none",
+                          background: "transparent",
+                          color: "#4A5568",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                        aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                      >
+                        {showConfirmPassword ? "Hide" : "Show"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="city"
+                      style={{ display: "block", marginBottom: 5, fontSize: 12, fontWeight: 600, color: "#4A5568" }}
+                    >
+                      City
+                    </label>
+                    <select
+                      id="city"
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      required
+                      style={{
+                        width: "100%",
+                        border: "1px solid rgba(0,0,0,0.08)",
+                        background: "#FAFAF8",
+                        borderRadius: 10,
+                        padding: "10px 12px",
+                        fontSize: 14,
+                        color: "#0D1B2A",
+                        outline: "none",
+                      }}
+                    >
+                      <option value="Jalandhar">Jalandhar</option>
+                      <option value="Ludhiana">Ludhiana</option>
+                      <option value="Amritsar">Amritsar</option>
+                      <option value="Chandigarh">Chandigarh</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="state"
+                      style={{ display: "block", marginBottom: 5, fontSize: 12, fontWeight: 600, color: "#4A5568" }}
+                    >
+                      State
+                    </label>
+                    <select
+                      id="state"
+                      value={state}
+                      onChange={(e) => setState(e.target.value)}
+                      required
+                      style={{
+                        width: "100%",
+                        border: "1px solid rgba(0,0,0,0.08)",
+                        background: "#FAFAF8",
+                        borderRadius: 10,
+                        padding: "10px 12px",
+                        fontSize: 14,
+                        color: "#0D1B2A",
+                        outline: "none",
+                      }}
+                    >
+                      <option value="Punjab">Punjab</option>
+                      <option value="Haryana">Haryana</option>
+                      <option value="Himachal Pradesh">Himachal Pradesh</option>
+                      <option value="Chandigarh">Chandigarh</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div>
-                  <label htmlFor="state" style={{ display: "block", marginBottom: 7, fontSize: 12, fontWeight: 600, color: "#4A5568" }}>
-                    State
+                  <label
+                    htmlFor="phone"
+                    style={{ display: "block", marginBottom: 5, fontSize: 12, fontWeight: 600, color: "#4A5568" }}
+                  >
+                    Contact Mobile <span style={{ fontWeight: 400, color: "#8A9BAA" }}>(optional)</span>
                   </label>
-                  <select
-                    id="state"
-                    value={state}
-                    onChange={(event) => setState(event.target.value)}
-                    required
+                  <input
+                    id="phone"
+                    type="tel"
+                    placeholder="10-digit mobile number"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
                     style={{
                       width: "100%",
                       border: "1px solid rgba(0,0,0,0.08)",
                       background: "#FAFAF8",
-                      borderRadius: 12,
-                      padding: "12px 14px",
+                      borderRadius: 10,
+                      padding: "10px 12px",
                       fontSize: 14,
                       color: "#0D1B2A",
                       outline: "none",
                     }}
-                  >
-                    <option value="Punjab">Punjab</option>
-                    <option value="Haryana">Haryana</option>
-                    <option value="Himachal Pradesh">Himachal Pradesh</option>
-                    <option value="Chandigarh">Chandigarh</option>
-                  </select>
+                  />
                 </div>
-              </div>
 
-              <button
-                type="submit"
-                disabled={loading || !phoneVerified || !emailVerified || !firebaseEmailToken}
-                className="btn-yellow"
-                style={{
-                  width: "100%",
-                  textAlign: "center",
-                  opacity:
-                    loading || !phoneVerified || !emailVerified || !firebaseEmailToken ? 0.75 : 1,
-                  cursor:
-                    loading || !phoneVerified || !emailVerified || !firebaseEmailToken
-                      ? "not-allowed"
-                      : "pointer",
-                  marginTop: 10,
-                }}
-              >
-                {loading ? "Creating Account..." : "Create Account"}
-              </button>
-            </form>
-          ) : null}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="btn-yellow"
+                  style={{
+                    width: "100%",
+                    textAlign: "center",
+                    opacity: loading ? 0.75 : 1,
+                    cursor: loading ? "not-allowed" : "pointer",
+                    marginTop: 10,
+                  }}
+                >
+                  {loading ? "Creating Account..." : "Create Account"}
+                </button>
+              </form>
 
-          {error ? <p style={{ marginTop: 12, fontSize: 13, color: "#B91C1C" }}>{error}</p> : null}
+              {error ? (
+                <p style={{ marginTop: 12, fontSize: 13, color: "#B91C1C", fontWeight: 500 }}>
+                  {error}
+                </p>
+              ) : null}
 
-          <p style={{ marginTop: 28, fontSize: 13, color: "#4A5568" }}>
-            Already have an account?{" "}
-            <Link href="/login" style={{ color: "#0D1B2A", fontWeight: 700, textDecoration: "none" }}>
-              Log in
-            </Link>
-          </p>
+              <p style={{ marginTop: 22, fontSize: 13, color: "#4A5568", textAlign: "center" }}>
+                Already have an account?{" "}
+                <Link href="/login" style={{ color: "#0D1B2A", fontWeight: 700, textDecoration: "none" }}>
+                  Login
+                </Link>
+              </p>
+            </>
+          )}
         </div>
       </div>
     </div>

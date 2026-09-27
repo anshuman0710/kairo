@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { signOut } from "firebase/auth";
+import { getFirebaseAuth } from "@/lib/firebase/client";
 import { useUser } from "@/lib/useUser";
 
 export default function Navbar() {
@@ -27,6 +29,12 @@ export default function Navbar() {
   }, []);
 
   async function handleLogout() {
+    try {
+      const auth = getFirebaseAuth();
+      if (auth) {
+        await signOut(auth).catch(() => {});
+      }
+    } catch (_e) {}
     await fetch("/api/auth/logout");
     router.push("/");
     await mutate();
