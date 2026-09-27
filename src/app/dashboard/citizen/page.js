@@ -7,10 +7,14 @@ import { useEffect, useMemo, useState } from "react";
 import CitizenSidebar from "@/components/CitizenSidebar";
 import Navbar from "@/components/Navbar";
 import { useUser } from "@/lib/useUser";
+import { getFirebaseAuth } from "@/lib/firebase/client";
+import { sendEmailVerification } from "firebase/auth";
 
 export default function CitizenDashboardPage() {
   const router = useRouter();
   const { user, isLoading } = useUser();
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [bannerMsg, setBannerMsg] = useState("");
   const [statsLoading, setStatsLoading] = useState(true);
   const [petitionsLoading, setPetitionsLoading] = useState(true);
   const [issues, setIssues] = useState([]);
@@ -26,6 +30,28 @@ export default function CitizenDashboardPage() {
       publicPetitions: publicPetitions.length,
     };
   }, [issues, signedPetitionIds, publicPetitions]);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setInterval(() => setResendCooldown((p) => (p <= 1 ? 0 : p - 1)), 1000);
+    return () => clearInterval(t);
+  }, [resendCooldown]);
+
+  async function handleResendVerificationEmail() {
+    if (resendCooldown > 0) return;
+    try {
+      const auth = getFirebaseAuth();
+      if (auth?.currentUser) {
+        await sendEmailVerification(auth.currentUser);
+        setBannerMsg("Verification email sent! Check your inbox.");
+        setResendCooldown(60);
+      } else {
+        setBannerMsg("Please log in again to request a verification email.");
+      }
+    } catch (_err) {
+      setBannerMsg("Unable to send verification email right now.");
+    }
+  }
 
   useEffect(() => {
     if (!isLoading && (!user || user.role !== "citizen")) {
@@ -133,6 +159,47 @@ export default function CitizenDashboardPage() {
         {/* ── Main content ── */}
         <main style={{ flex: 1, minWidth: 0, overflowX: "hidden", padding: "20px 40px 80px" }}>
           <div style={{ maxWidth: "860px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "36px" }}>
+            {!user.isEmailVerified && (
+              <div
+                style={{
+                  background: "#FFFBEB",
+                  border: "1px solid #FDE68A",
+                  borderRadius: "14px",
+                  padding: "16px 20px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "12px",
+                }}
+              >
+                <div>
+                  <p style={{ margin: 0, fontSize: "14px", fontWeight: 600, color: "#92400E" }}>
+                    ⚠️ Your email ({user.email}) is not verified yet
+                  </p>
+                  <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "#B45309" }}>
+                    {bannerMsg || "Please verify your email address to ensure full access to petition creation and grievance tracking."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleResendVerificationEmail}
+                  disabled={resendCooldown > 0}
+                  className="btn-outline-sm"
+                  style={{
+                    fontSize: "12px",
+                    padding: "6px 14px",
+                    background: "white",
+                    borderColor: "#D97706",
+                    color: "#92400E",
+                    cursor: resendCooldown > 0 ? "not-allowed" : "pointer",
+                    opacity: resendCooldown > 0 ? 0.6 : 1,
+                  }}
+                >
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend Verification Email"}
+                </button>
+              </div>
+            )}
 
             {/* ── Hero card ── */}
             <section
@@ -203,52 +270,52 @@ export default function CitizenDashboardPage() {
             >
               {statsLoading
                 ? [1, 2, 3, 4].map((i) => (
-                    <div
-                      key={i}
-                      style={{
-                        height: "120px",
-                        borderRadius: "16px",
-                        background: "#F3F4F6",
-                        animation: "pulse 1.5s ease-in-out infinite",
-                      }}
-                    />
-                  ))
+                  <div
+                    key={i}
+                    style={{
+                      height: "120px",
+                      borderRadius: "16px",
+                      background: "#F3F4F6",
+                      animation: "pulse 1.5s ease-in-out infinite",
+                    }}
+                  />
+                ))
                 : statCards.map(({ label, value }) => (
-                    <div
-                      key={label}
+                  <div
+                    key={label}
+                    style={{
+                      background: "#FFFFFF",
+                      borderRadius: "16px",
+                      padding: "22px 20px",
+                      boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
+                    }}
+                  >
+                    <p
                       style={{
-                        background: "#FFFFFF",
-                        borderRadius: "16px",
-                        padding: "22px 20px",
-                        boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
+                        margin: 0,
+                        fontSize: "10px",
+                        fontWeight: 700,
+                        letterSpacing: "0.09em",
+                        textTransform: "uppercase",
+                        color: "#4A5568",
                       }}
                     >
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: "10px",
-                          fontWeight: 700,
-                          letterSpacing: "0.09em",
-                          textTransform: "uppercase",
-                          color: "#4A5568",
-                        }}
-                      >
-                        {label}
-                      </p>
-                      <p
-                        style={{
-                          margin: "10px 0 0",
-                          fontSize: "38px",
-                          lineHeight: 1,
-                          color: "#0D1B2A",
-                          fontFamily: "Fraunces, serif",
-                          fontWeight: 800,
-                        }}
-                      >
-                        {value}
-                      </p>
-                    </div>
-                  ))}
+                      {label}
+                    </p>
+                    <p
+                      style={{
+                        margin: "10px 0 0",
+                        fontSize: "38px",
+                        lineHeight: 1,
+                        color: "#0D1B2A",
+                        fontFamily: "Fraunces, serif",
+                        fontWeight: 800,
+                      }}
+                    >
+                      {value}
+                    </p>
+                  </div>
+                ))}
             </section>
 
             {/* ── Public Petitions ── */}
